@@ -1,0 +1,79 @@
+version: "3.9"
+
+# ==============================================================================
+# DevPulse Agent OS — Docker Compose
+# Services: backend (FastAPI) · frontend (Next.js) · postgres
+# ==============================================================================
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # FastAPI Backend
+  # ────────────────────────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: devpulse_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://devpulse:devpulse_secret@postgres:5432/devpulse_db
+      DEBUG: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app   # Hot reload during development
+      - ./keys:/app/keys:ro      # Mount GitHub App private keys (read-only)
+    networks:
+      - devpulse_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Next.js Frontend
+  # ────────────────────────────────────────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    container_name: devpulse_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - devpulse_net
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 16
+  # ────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: devpulse_postgres
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: devpulse
+      POSTGRES_PASSWORD: devpulse_secret
+      POSTGRES_DB: devpulse_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devpulse -d devpulse_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - devpulse_net
+
+volumes:
+  postgres_data:
+
+networks:
+  devpulse_net:
+    driver: bridge
