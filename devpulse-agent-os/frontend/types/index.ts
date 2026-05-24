@@ -58,6 +58,7 @@ export interface LinkedActivityRecord {
   repository: string;
   commit_message: string;
   pr_title: string;
+  match_type: 'regex' | 'ai';
   created_at: string | null;
 }
 
@@ -84,3 +85,46 @@ export interface IntegrationStatus {
   };
   checked_at: string;
 }
+
+// ─── Ticket Context (View Context panel) ──────────────────────────────────────
+
+export interface GitHubCommit {
+  sha: string;
+  message: string;
+  author: string;
+}
+
+export interface GitHubContextEvent {
+  event_id: number;
+  event_type: string;
+  repository: string;
+  branch: string;
+  pusher: string;
+  commits: GitHubCommit[];
+  pr_title: string;
+  pr_number: number | null;
+  pr_state: string;
+  pr_url: string;
+  pr_merged: boolean;
+  created_at: string | null;
+  linked_at: string | null;
+}
+
+export interface TicketContext {
+  issue_key: string;
+  jira: {
+    key: string;
+    summary: string;
+    description: string;
+    status: string;
+    priority: string;
+    url: string | null;
+  };
+  github: {
+    total_events: number;
+    events: GitHubContextEvent[];
+  };
+  ai_summary: string;
+  generated_at: string;
+}
+

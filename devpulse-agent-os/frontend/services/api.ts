@@ -1,4 +1,4 @@
-import { DashboardData, LinkedActivityRecord, EventCounts, IntegrationStatus } from '../types';
+import { DashboardData, LinkedActivityRecord, EventCounts, IntegrationStatus, TicketContext } from '../types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_V1 = `${API_BASE}/api`;
@@ -84,3 +84,10 @@ export async function fetchAgentHealth() {
 export async function fetchJiraIssues() {
   return fetchJson(`${API_V1}/jira/issues`);
 }
+
+// ─── Ticket Context ───────────────────────────────────────────────────────────
+
+export async function fetchTicketContext(issueKey: string): Promise<TicketContext> {
+  return fetchJson<TicketContext>(`${API_V1}/context/${issueKey}`);
+}
+

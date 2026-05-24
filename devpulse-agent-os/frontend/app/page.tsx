@@ -9,6 +9,7 @@ import { ActivityTimeline } from '@/components/ActivityTimeline';
 import { LinkedActivityPanel } from '@/components/LinkedActivityPanel';
 import { EventCounter } from '@/components/EventCounter';
 import { ToastContainer, ToastMessage, ToastType } from '@/components/Toast';
+import { ContextDrawer } from '@/components/ContextDrawer';
 import {
   fetchBattlePlan,
   startIssue,
@@ -17,8 +18,9 @@ import {
   fetchLinkedActivity,
   fetchIntegrationStatus,
   triggerCorrelation,
+  fetchTicketContext,
 } from '@/services/api';
-import { DashboardData, BattlePlanItem, ActivityEvent, LinkedActivityRecord, EventCounts, IntegrationStatus } from '@/types';
+import { DashboardData, BattlePlanItem, ActivityEvent, LinkedActivityRecord, EventCounts, IntegrationStatus, TicketContext } from '@/types';
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -33,6 +35,10 @@ export default function Dashboard() {
   const [linkedLoading, setLinkedLoading] = useState(false);
   const [eventCounts, setEventCounts] = useState<EventCounts | null>(null);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+
+  // ─── Context Drawer state ──────────────────────────────────────────────────
+  const [contextData, setContextData] = useState<TicketContext | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
 
   // ─── Load persisted activities ──────────────────────────────────────────────
   useEffect(() => {
@@ -158,11 +164,36 @@ export default function Dashboard() {
     }
   }, [showToast]);
 
+  // ─── View Context handler ────────────────────────────────────────────────────
+  const handleViewContext = useCallback(async (task: BattlePlanItem) => {
+    setContextData(null);
+    setContextLoading(true);
+    try {
+      const ctx = await fetchTicketContext(task.key);
+      setContextData(ctx);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load context';
+      showToast(msg, 'error');
+    } finally {
+      setContextLoading(false);
+    }
+  }, [showToast]);
+
+  const handleCloseContext = useCallback(() => {
+    setContextData(null);
+    setContextLoading(false);
+  }, []);
+
   const jiraConnected = integrationStatus?.jira.status === 'connected';
   const githubConnected = integrationStatus?.github.status === 'connected';
 
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
+      <ContextDrawer
+        context={contextData}
+        loading={contextLoading}
+        onClose={handleCloseContext}
+      />
       <div className="max-w-[1280px] mx-auto px-5 py-8">
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
@@ -252,6 +283,7 @@ export default function Dashboard() {
                         key={task.id}
                         task={task}
                         onAction={handleAction}
+                        onContext={handleViewContext}
                         busyTaskKey={busyTaskKey}
                         busyAction={busyAction}
                         isHovered={hoveredTaskKey === task.key}

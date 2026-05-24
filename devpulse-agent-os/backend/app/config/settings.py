@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Optional: Groq for AI priority analysis
     groq_api_key: str = ""
-    groq_model: str = "llama3-8b-8192"
+    groq_model: str = "llama-3.1-8b-instant"
 
     class Config:
         env_file = ".env"

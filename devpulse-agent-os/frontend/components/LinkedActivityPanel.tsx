@@ -19,7 +19,7 @@ export function LinkedActivityPanel({ records, loading, onCorrelate }: LinkedAct
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">GitHub ↔ Jira Correlation</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Auto-linked from commit/PR messages</p>
+          <p className="text-xs text-gray-400 mt-0.5">Regex matched + <span className="text-indigo-500 font-semibold">✦ AI matched</span></p>
         </div>
         {onCorrelate && (
           <button
@@ -64,6 +64,16 @@ export function LinkedActivityPanel({ records, loading, onCorrelate }: LinkedAct
                         </a>
                       ) : (
                         <span className="font-mono text-xs font-bold text-blue-600">{record.jira_ticket_id}</span>
+                      )}
+                      {/* AI match badge */}
+                      {record.match_type === 'ai' ? (
+                        <span className="text-[9px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded font-bold uppercase tracking-wide">
+                          ✦ AI
+                        </span>
+                      ) : (
+                        <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-400 border border-gray-200 rounded font-medium uppercase tracking-wide">
+                          regex
+                        </span>
                       )}
                       {/* GitHub Event Type Badge */}
                       {record.github_event_type && (

@@ -63,6 +63,7 @@ class LinkedActivity(Base):
     Correlation bridge tying a GitHub event to a Jira ticket.
     Populated automatically by the correlation engine when a Jira key
     is extracted from a GitHub event payload.
+    match_type: 'regex' (ticket key found in commit) | 'ai' (Groq semantic match)
     """
     __tablename__ = "linked_activity"
 
@@ -75,6 +76,7 @@ class LinkedActivity(Base):
     )
     jira_ticket_id = Column(String(50), index=True, nullable=False)
     description = Column(Text, nullable=True)
+    match_type = Column(String(20), nullable=False, server_default="regex")  # 'regex' | 'ai'
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     github_event = relationship("GitHubEvent", back_populates="linked_activities")

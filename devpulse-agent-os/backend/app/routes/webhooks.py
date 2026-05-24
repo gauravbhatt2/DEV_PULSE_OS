@@ -7,15 +7,16 @@ Routes:
   POST /webhooks/cicd    — CI/CD pipeline events
 """
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
-from app.models.events import CICDPipeline, GitHubEvent, JiraEvent, SlackThread
+from app.models.events import CICDPipeline, GitHubEvent, JiraEvent, LinkedActivity, SlackThread
 from app.services.correlation_service import auto_correlate_github_event, extract_jira_keys_from_payload
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 _JIRA_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9_]+-\d+)\b")
+
+
+async def _run_ai_match_for_event(event_id: int):
+    """
+    Background task: fetch the GitHub event from DB by ID, get active Jira tickets,
+    and run AI correlation to try to match it without a ticket key.
+    """
+    from app.config.database import SessionLocal
+    from app.services import jira_service
+    from app.services.smart_correlation_service import ai_correlate_single_event
+
+    db = SessionLocal()
+    try:
+        event = db.get(GitHubEvent, event_id)
+        if not event:
+            return
+
+        # Only process if still unlinked
+        existing = db.query(LinkedActivity).filter(
+            LinkedActivity.github_event_id == event_id
+        ).first()
+        if existing:
+            return
+
+        if not jira_service.is_jira_configured():
+            logger.info("AI matching skipped — Jira not configured")
+            return
+
+        try:
+            tickets = await jira_service.get_issues()
+        except Exception as exc:
+            logger.warning("AI matching: could not fetch Jira tickets: %s", exc)
+            return
+
+        await ai_correlate_single_event(event, tickets, db)
+
+    except Exception as exc:
+        logger.error("AI matching background task failed for event %s: %s", event_id, exc)
+    finally:
+        db.close()
+
+
 
 
 def _extract_jira_key(text: str):
@@ -39,6 +82,7 @@ def _extract_jira_key(text: str):
 )
 async def ingest_github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     x_github_event: str = Header(
         default="unknown",
@@ -74,8 +118,12 @@ async def ingest_github_webhook(
         logger.error("GitHub webhook — DB commit failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to persist GitHub event.")
 
-    # Auto-correlate: create LinkedActivity if ticket ID was extracted
-    linked = auto_correlate_github_event(event, db)
+    # Auto-correlate: create LinkedActivity if ticket ID was extracted (regex match)
+    linked = auto_correlate_github_event(event, db, match_type="regex")
+
+    # If NO ticket key was found in the commit, queue AI matching as a background task
+    if not extracted_ticket_id:
+        background_tasks.add_task(_run_ai_match_for_event, event.id)
 
     logger.info(
         "GitHub event stored: id=%s type=%r ticket=%s linked=%s",
@@ -91,6 +139,7 @@ async def ingest_github_webhook(
         "event_type": event.event_type,
         "extracted_ticket_id": event.extracted_ticket_id,
         "linked_activity_id": linked.id if linked else None,
+        "ai_matching_queued": not bool(extracted_ticket_id),
     }
 
 

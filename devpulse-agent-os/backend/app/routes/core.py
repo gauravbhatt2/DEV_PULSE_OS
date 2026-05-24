@@ -163,6 +163,7 @@ def get_linked_activity(
                 "repository": repo,
                 "commit_message": commit_msg,
                 "pr_title": pr_title,
+                "match_type": r.match_type or "regex",
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             })
 
@@ -176,15 +177,34 @@ def get_linked_activity(
 # POST /api/correlate
 # ---------------------------------------------------------------------------
 @router.post("/api/correlate", summary="Run Correlation Pass", tags=["Correlation"])
-def trigger_correlation(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def trigger_correlation(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
-    Manually trigger the correlation engine to process all GitHub events
-    that have an extracted ticket ID but no existing LinkedActivity record.
+    Manually trigger the correlation engine:
+    1. Regex pass — links events that mention a Jira key in commits/PRs
+    2. AI pass — uses Groq to semantically match remaining unlinked events
     """
+    from app.services.smart_correlation_service import run_ai_correlation_pass
+    from app.services import jira_service
+
     try:
-        result = run_correlation_pass(db)
+        # Pass 1: regex correlation
+        regex_result = run_correlation_pass(db)
+
+        # Pass 2: AI correlation for events with no ticket key
+        ai_result = {"events_scanned": 0, "ai_links_created": 0, "errors": 0}
+        if jira_service.is_jira_configured():
+            try:
+                tickets = await jira_service.get_issues()
+                ai_result = await run_ai_correlation_pass(db, tickets)
+            except Exception as exc:
+                logger.warning("AI correlation pass failed: %s", exc)
+
         return {
-            **result,
+            "regex_pass": regex_result,
+            "ai_pass": ai_result,
+            "links_created": regex_result["links_created"] + ai_result["ai_links_created"],
+            "events_processed": regex_result["events_processed"],
+            "ai_events_scanned": ai_result["events_scanned"],
             "triggered_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as exc:
