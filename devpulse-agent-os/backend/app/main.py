@@ -32,6 +32,7 @@ from app.routes.webhooks import router as webhooks_router
 from app.routes.battle_plan import router as battle_plan_router
 from app.routes.issues import router as issues_router
 from app.routes.jira import router as jira_router
+from app.routes.github_intel import router as github_intel_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -88,6 +89,9 @@ app.include_router(webhooks_router)
 app.include_router(battle_plan_router, prefix="/api")
 app.include_router(issues_router, prefix="/api")
 app.include_router(jira_router, prefix="/api")
+
+# GitHub Intelligence Dashboard
+app.include_router(github_intel_router)
 
 
 @app.get("/", tags=["Root"], include_in_schema=False)

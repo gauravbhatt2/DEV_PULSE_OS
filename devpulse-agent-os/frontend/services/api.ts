@@ -84,3 +84,41 @@ export async function fetchAgentHealth() {
 export async function fetchJiraIssues() {
   return fetchJson(`${API_V1}/jira/issues`);
 }
+
+// ─── GitHub Intelligence ─────────────────────────────────────────────────────
+
+import type {
+  GitHubRepo,
+  GitHubActivityEvent,
+  GitHubCommit,
+  GitHubPR,
+  GitHubRepoDetails,
+  CommitAnalysisResult,
+} from '../types';
+
+export async function fetchGitHubRepos(): Promise<GitHubRepo[]> {
+  return fetchJson<GitHubRepo[]>(`${API_V1}/v1/github/repos`);
+}
+
+export async function fetchGitHubActivity(limit = 50): Promise<GitHubActivityEvent[]> {
+  return fetchJson<GitHubActivityEvent[]>(`${API_V1}/v1/github/activity?limit=${limit}`);
+}
+
+export async function fetchRepoDetails(owner: string, repo: string): Promise<GitHubRepoDetails> {
+  return fetchJson<GitHubRepoDetails>(`${API_V1}/v1/github/repos/${owner}/${repo}/details`);
+}
+
+export async function fetchRepoCommits(owner: string, repo: string, perPage = 20): Promise<GitHubCommit[]> {
+  return fetchJson<GitHubCommit[]>(`${API_V1}/v1/github/repos/${owner}/${repo}/commits?per_page=${perPage}`);
+}
+
+export async function fetchRepoPRs(owner: string, repo: string, state = 'open'): Promise<GitHubPR[]> {
+  return fetchJson<GitHubPR[]>(`${API_V1}/v1/github/repos/${owner}/${repo}/pulls?state=${state}`);
+}
+
+export async function analyzeCommit(owner: string, repo: string, sha: string): Promise<CommitAnalysisResult> {
+  return fetchJson<CommitAnalysisResult>(`${API_V1}/v1/github/analyze-commit`, {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, sha }),
+  });
+}

@@ -149,6 +149,119 @@ async def get_pull_requests(owner: str, repo: str, installation_token: str, stat
         return []
 
 
+async def get_commits(
+    owner: str, repo: str, installation_token: str, per_page: int = 30
+) -> list:
+    """Fetch recent commits for a repository."""
+    headers = {
+        "Authorization": f"Bearer {installation_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits",
+                headers=headers,
+                params={"per_page": per_page},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch commits for %s/%s: %s", owner, repo, exc)
+        return []
+
+
+async def get_commit_detail(
+    owner: str, repo: str, sha: str, installation_token: str
+) -> Optional[Dict[str, Any]]:
+    """Fetch full commit detail including changed files and patches."""
+    headers = {
+        "Authorization": f"Bearer {installation_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch commit detail %s/%s@%s: %s", owner, repo, sha, exc)
+        return None
+
+
+async def get_repo_details(
+    owner: str, repo: str, installation_token: str
+) -> Optional[Dict[str, Any]]:
+    """Fetch repository metadata including stats."""
+    headers = {
+        "Authorization": f"Bearer {installation_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch repo details for %s/%s: %s", owner, repo, exc)
+        return None
+
+
+async def get_branches(
+    owner: str, repo: str, installation_token: str
+) -> list:
+    """Fetch branches for a repository."""
+    headers = {
+        "Authorization": f"Bearer {installation_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/branches",
+                headers=headers,
+                params={"per_page": 30},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch branches for %s/%s: %s", owner, repo, exc)
+        return []
+
+
+async def get_contributors(
+    owner: str, repo: str, installation_token: str
+) -> list:
+    """Fetch top contributors for a repository."""
+    headers = {
+        "Authorization": f"Bearer {installation_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/contributors",
+                headers=headers,
+                params={"per_page": 10},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Failed to fetch contributors for %s/%s: %s", owner, repo, exc)
+        return []
+
+
 async def get_github_app_status() -> Dict[str, Any]:
     """
     Return the GitHub App integration status.

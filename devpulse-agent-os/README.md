@@ -1,7 +1,7 @@
 # DevPulse Agent OS
 
 > **Enterprise Developer Workflow Intelligence Platform**  
-> GitHub + Jira correlation · AI-powered battle plans · Real-time activity dashboard
+> GitHub + Jira correlation · AI-powered battle plans · Real-time activity dashboard · **GitHub Intelligence Dashboard**
 
 ---
 
@@ -23,10 +23,12 @@
 14. [GitHub Webhook Setup](#14-github-webhook-setup)
 15. [Private Key Setup](#15-private-key-setup)
 16. [Jira Setup](#16-jira-setup)
-17. [Swagger API Usage](#17-swagger-api-usage)
-18. [Example Webhook Testing Flow](#18-example-webhook-testing-flow)
-19. [Demo Flow](#19-demo-flow)
-20. [Troubleshooting](#20-troubleshooting)
+17. [GitHub Intelligence Dashboard](#17-github-intelligence-dashboard)
+18. [AI Commit Analysis](#18-ai-commit-analysis)
+19. [Swagger API Usage](#19-swagger-api-usage)
+20. [Example Webhook Testing Flow](#20-example-webhook-testing-flow)
+21. [Demo Flow](#21-demo-flow)
+22. [Troubleshooting](#22-troubleshooting)
 
 ---
 
@@ -39,6 +41,7 @@ DevPulse Agent OS is an enterprise-grade developer productivity platform that:
 - **Creates linked activity records** in PostgreSQL bridging GitHub events to Jira tickets
 - **Fetches live Jira data** via the Jira REST API v3
 - **Generates AI-prioritized daily battle plans** using keyword analysis (or Groq LLM)
+- **GitHub Intelligence Dashboard** — view repos, commits, PRs, and AI-analyze any commit
 - **Visualizes everything** in a modern Next.js dashboard with real-time correlation view
 
 **Core Correlation Flow:**
@@ -572,7 +575,116 @@ To receive real-time Jira events in DevPulse:
 
 ---
 
-## 17. Swagger API Usage
+## 17. GitHub Intelligence Dashboard
+
+The GitHub Intelligence Dashboard at **http://localhost:3000/github** provides:
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Navigation Header                          │
+├──────────────┬─────────────────────────┬─────────────────────┤
+│   Repo List  │    Activity / Commits   │   AI Analysis Panel │
+│  (sidebar)   │       / PRs Feed        │   + Repo Insights   │
+│              │                         │                     │
+│  • Search    │  Tabs:                  │  • Summary          │
+│  • Language  │  • Live Feed            │  • Risk Level       │
+│    dot       │  • Commits + [Analyze]  │  • What Changed     │
+│  • Issues    │  • Pull Requests        │  • Why Changed      │
+│    count     │                         │  • Impact           │
+│  • Last push │  Auto-refresh: 30s      │  • Affected Modules │
+│              │                         │  • Linked Jira      │
+└──────────────┴─────────────────────────┴─────────────────────┘
+```
+
+### Features
+
+1. **Repository List** — All repos connected to your GitHub App, searchable, with language indicators
+2. **Live Activity Feed** — All webhook events in real-time (push, PR, create), auto-refreshes every 30 seconds
+3. **Commits View** — Recent commits per repo with `+/-` stats, Jira ticket links, and `[Analyze]` button
+4. **Pull Requests View** — Open/closed/merged PRs with branch info, Jira correlation, and status badges
+5. **AI Analysis** — Click `Analyze` on any commit to get instant AI-powered explanation
+6. **Engineering Insights** — When a repo is selected (without analysis), shows branches, contributors, and repo stats
+
+### Repository Sync
+
+Repositories are fetched live from the GitHub App installation — no manual configuration needed. Any repo the GitHub App is installed on will appear automatically.
+
+---
+
+## 18. AI Commit Analysis
+
+### How It Works
+
+```
+Click [Analyze] on a commit
+        ↓
+Backend fetches commit detail from GitHub API
+(includes file diffs, +/- line counts, patches)
+        ↓
+Sends structured prompt to AI:
+  - Commit message
+  - Changed files with patches
+  - Linked Jira ticket (if detected)
+        ↓
+AI returns structured JSON:
+  - summary
+  - what_changed
+  - why_it_changed
+  - impact
+  - risk_level (low / medium / high)
+  - affected_modules
+        ↓
+Displayed in right-side Analysis Panel
+```
+
+### AI Backend Selection
+
+| Condition | AI Used |
+|---|---|
+| `GROQ_API_KEY` is set | Groq (`llama3-8b-8192`) — fast, cloud |
+| No Groq key, Ollama running | Ollama (`qwen2.5:3b`) — local, private |
+| Both unavailable | Keyword fallback (no AI, heuristic only) |
+
+### Example Analysis Output
+
+```json
+{
+  "summary": "Refactors the authentication middleware to use JWT instead of session cookies.",
+  "what_changed": "Replaced express-session with jsonwebtoken. Added token verification in auth.middleware.ts.",
+  "why_it_changed": "Likely migrating to a stateless architecture for scalability across multiple services.",
+  "impact": "All protected API routes now require Bearer tokens. Frontend auth flow must be updated.",
+  "risk_level": "high",
+  "risk_reason": "Core authentication system change affecting all protected routes.",
+  "affected_modules": ["auth", "middleware", "routes"]
+}
+```
+
+### Groq Setup
+
+1. Create a free account at [console.groq.com](https://console.groq.com)
+2. Generate an API key
+3. Add to `.env`:
+   ```
+   GROQ_API_KEY=gsk_your_key_here
+   GROQ_MODEL=llama3-8b-8192
+   ```
+4. Restart the backend — AI analysis is now live
+
+### Ollama Setup (Local Fallback)
+
+```bash
+# Install Ollama from https://ollama.com
+ollama pull qwen2.5:3b
+ollama serve
+```
+
+Ollama runs at `http://localhost:11434` by default. The Docker container accesses it via `host.docker.internal:11434`.
+
+---
+
+## 19. Swagger API Usage
 
 The full interactive API documentation is available at:
 
@@ -656,7 +768,7 @@ curl -X POST http://localhost:8000/api/correlate
 
 ---
 
-## 19. Demo Flow
+## 21. Demo Flow
 
 This is the recommended demo sequence for the hackathon presentation:
 
@@ -690,7 +802,17 @@ curl -X POST http://localhost:8000/webhooks/github \
 - Show tasks sorted by AI priority (P0 → P1 → P2)
 - Demonstrate "Start Now" to move issue to In Progress
 
-**Step 4 — Show Correlation Engine**
+**Step 4 — GitHub Intelligence Dashboard**
+- Navigate to `http://localhost:3000/github`
+- Show the repository list on the left
+- Click a repository — commits and PRs load instantly
+- Click **[Analyze]** on a commit
+- Watch AI explain the change in plain English:
+  - What changed, why it changed, impact, risk level
+  - Linked Jira ticket shown automatically if detected
+- Demonstrate live activity feed updating in real time
+
+**Step 5 — Show Correlation Engine**
 ```bash
 curl -X POST http://localhost:8000/api/correlate
 ```
