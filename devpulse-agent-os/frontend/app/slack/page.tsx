@@ -12,11 +12,23 @@ const CHANNEL =
   (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SLACK_DEFAULT_CHANNEL) ||
   'development';
 
+// Virtual channel that aggregates messages from every member channel
+const ALL_CHANNELS = '__all__';
+
+/** Format a raw Slack user ID into something readable if real name lookup failed */
+function formatUser(id: string): string {
+  // Slack user IDs look like U012AB3CD or W012AB3CD — ~9–11 uppercase alphanumeric chars
+  if (/^[UW][A-Z0-9]{8,10}$/.test(id)) {
+    return `@user·${id.slice(-5)}`; // e.g. "@user·JEGUU"
+  }
+  return id; // already a real name
+}
+
 export default function SlackIntelligencePage() {
   const [messages, setMessages]               = useState<SlackMessage[]>([]);
   const [loading, setLoading]                 = useState(true);
   const [error, setError]                     = useState<string | null>(null);
-  const [channel, setChannel]                 = useState(CHANNEL);
+  const [channel, setChannel]                 = useState(ALL_CHANNELS);  // default: all channels
   const [filter, setFilter]                   = useState<FilterMode>('all');
   const [search, setSearch]                   = useState('');
   const [workspace, setWorkspace]             = useState<string | null>(null);
@@ -33,18 +45,50 @@ export default function SlackIntelligencePage() {
       .then(s => { setWorkspace(s.workspace ?? null); setBotUser(s.bot_user ?? null); })
       .catch(() => {});
     fetchSlackChannels()
-      .then(chs => setChannels(chs))
-      .catch(() => {})
-      .finally(() => setChannelsLoading(false));
+      .then(chs => { setChannels(chs); setChannelsLoading(false); })
+      .catch(() => setChannelsLoading(false));
   }, []);
 
-  // ── Fetch messages ────────────────────────────────────────────────────────────
+  // ── Fetch messages (ALL_CHANNELS fetches fresh channel list inline) ───────────
   const loadMessages = useCallback(async (ch: string, silent = false) => {
     if (!silent) setLoading(true); else setSyncing(true);
     setError(null);
     try {
-      const res = await fetchSlackMessages(ch, 50);
-      setMessages(res.messages);
+      if (ch === ALL_CHANNELS) {
+        // ─ Fetch channel list fresh inside the function so we never use stale state ─
+        let targets: string[] = [];
+        try {
+          const freshChannels = await fetchSlackChannels();
+          // Try all channels; the bot silently skips ones it can't access
+          targets = freshChannels.map(c => c.name);
+          // Update sidebar list too
+          setChannels(freshChannels);
+        } catch {
+          targets = [CHANNEL];
+        }
+        if (targets.length === 0) targets = [CHANNEL];
+
+        const results = await Promise.allSettled(
+          targets.map(name => fetchSlackMessages(name, 30))
+        );
+        const merged: SlackMessage[] = [];
+        for (const r of results) {
+          if (r.status === 'fulfilled') merged.push(...r.value.messages);
+        }
+        // Deduplicate by message text + timestamp, sort newest first
+        const seen = new Set<string>();
+        const deduped = merged.filter(m => {
+          const key = `${m.timestamp}::${m.message_text.slice(0, 40)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        deduped.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setMessages(deduped);
+      } else {
+        const res = await fetchSlackMessages(ch, 50);
+        setMessages(res.messages);
+      }
       setLastSynced(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch messages');
@@ -56,6 +100,7 @@ export default function SlackIntelligencePage() {
     intervalRef.current = setInterval(() => loadMessages(channel, true), 30_000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [channel, loadMessages]);
+
 
   const switchChannel = (name: string) => {
     if (name !== channel) { setChannel(name); setMessages([]); }
@@ -135,6 +180,27 @@ export default function SlackIntelligencePage() {
 
         {/* LEFT SIDEBAR — channel list + stats + filter */}
         <aside className="w-64 border-r border-gray-200 bg-white flex flex-col p-4 gap-5 flex-shrink-0">
+
+          {/* All Channels virtual entry */}
+          <div className="flex flex-col gap-0.5">
+            <button
+              id="channel-btn-all"
+              onClick={() => switchChannel(ALL_CHANNELS)}
+              className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                channel === ALL_CHANNELS
+                  ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-purple-500 text-[10px]">&#9733;</span>
+                <span>All Channels</span>
+              </div>
+              <span className={`text-[10px] ${
+                channel === ALL_CHANNELS ? 'text-purple-600' : 'text-gray-400'
+              }`}>{channels.filter(c => c.is_member).length}</span>
+            </button>
+          </div>
 
           {/* Dynamic Channel List */}
           <div>
@@ -347,10 +413,10 @@ function MessageCard({ msg }: { msg: SlackMessage }) {
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-            {msg.developer_id.slice(0, 2).toUpperCase()}
+            {formatUser(msg.developer_id).slice(0, 2).toUpperCase()}
           </div>
           <div>
-            <span className="text-xs font-semibold text-gray-800">{msg.developer_id}</span>
+            <span className="text-xs font-semibold text-gray-800">{formatUser(msg.developer_id)}</span>
             {formattedTs && <span className="ml-2 text-[10px] text-gray-400">{formattedTs}</span>}
           </div>
         </div>
@@ -410,7 +476,7 @@ function CorrelationSection({ title, color, icon, items }: {
           {items.slice(0, 15).map((item, i) => (
             <div key={i} className="flex items-center justify-between">
               <span className={`font-mono text-[11px] font-semibold ${textColors[color]}`}>{item.ref}</span>
-              <span className="text-[10px] text-gray-400 truncate ml-2 max-w-[80px]">{item.user}</span>
+              <span className="text-[10px] text-gray-400 truncate ml-2 max-w-[80px]">{formatUser(item.user)}</span>
             </div>
           ))}
         </div>

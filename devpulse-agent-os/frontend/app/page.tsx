@@ -22,6 +22,7 @@ import {
   fetchTicketContext,
   fetchSlackMessages,
   fetchSlackStatus,
+  fetchSlackChannels,
 } from '@/services/api';
 import {
   DashboardData,
@@ -35,8 +36,8 @@ import {
   SlackCorrelation,
 } from '@/types';
 
-// ─── Env-driven Slack channel (falls back to the channel the bot is in) ────────
-const SLACK_CHANNEL =
+// ─── Fallback channel if channel list API is unavailable ──────────────────────
+const FALLBACK_CHANNEL =
   (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SLACK_DEFAULT_CHANNEL) ||
   'development';
 
@@ -64,6 +65,8 @@ export default function Dashboard() {
   const [slackMessages, setSlackMessages] = useState<SlackMessage[]>([]);
   const [slackCorrelations, setSlackCorrelations] = useState<SlackCorrelation[]>([]);
   const [slackLoading, setSlackLoading] = useState(false);
+  const [slackSyncing, setSlackSyncing] = useState(false);
+  const [lastSlackSync, setLastSlackSync] = useState<string>('—');
 
   // ─── Load persisted activities ──────────────────────────────────────────────
   useEffect(() => {
@@ -99,27 +102,53 @@ export default function Dashboard() {
       .catch(() => {});
   }, []);
 
-  // ─── Slack message sync helper ────────────────────────────────────────────
-  // NOTE: We do NOT gate on slackConnected here — the status check is async
-  // and can resolve after the first render. We let it try and fail silently.
+  // ─── Slack multi-channel sync ─────────────────────────────────────────────
+  // Fetches ALL channels the bot is a member of in parallel, then aggregates
+  // every Jira ticket mention across the entire workspace into one feed.
   const syncSlackMessages = useCallback(async (silent = false) => {
     if (!silent) setSlackLoading(true);
+    else setSlackSyncing(true);
     try {
-      const response = await fetchSlackMessages(SLACK_CHANNEL, 30);
-      setSlackMessages(response.messages);
-      setSlackConnected(true); // mark connected if fetch succeeded
+      // Step 1: discover which channels the bot can read
+      let memberChannels: string[] = [];
+      try {
+        const allChannels = await fetchSlackChannels();
+        memberChannels = allChannels
+          .filter(ch => ch.is_member)
+          .map(ch => ch.name);
+      } catch {
+        // fallback to single configured channel if list API fails
+        memberChannels = [FALLBACK_CHANNEL];
+      }
+      if (memberChannels.length === 0) memberChannels = [FALLBACK_CHANNEL];
 
-      // ── Build correlation tiles from SLM-extracted indicators ──────────────
-      // A tile is emitted for every message that mentions at least ONE Jira
-      // ticket ID (e.g. SCRUM-3). A git ref (PR or SHA) enriches the tile
-      // but is not required — the tile still shows if only a ticket is found.
+      // Step 2: fetch messages from every member channel in parallel
+      const results = await Promise.allSettled(
+        memberChannels.map(ch => fetchSlackMessages(ch, 30))
+      );
+
+      // Step 3: aggregate all messages across all channels
+      const allMessages: SlackMessage[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          allMessages.push(...result.value.messages);
+        }
+      }
+
+      setSlackMessages(allMessages);
+      setSlackConnected(true);
+      setLastSlackSync(
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+
+      // Step 4: build correlation tiles — one per ticket ref per message
+      const seen = new Set<string>();
       const derived: SlackCorrelation[] = [];
-      for (const msg of response.messages) {
+
+      for (const msg of allMessages) {
         const { tickets, pull_requests, commit_shas } = msg.ticket_indicators;
+        if (tickets.length === 0) continue;
 
-        if (tickets.length === 0) continue; // no ticket ref → skip
-
-        // Pick the first git reference available (PR preferred over SHA)
         const gitRef =
           pull_requests.length > 0
             ? `PR #${pull_requests[0]}`
@@ -128,6 +157,9 @@ export default function Dashboard() {
             : '—';
 
         for (const ticketId of tickets) {
+          const dedupeKey = `${ticketId}::${msg.timestamp}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
           derived.push({
             ticket_id: ticketId,
             git_ref: gitRef,
@@ -137,20 +169,24 @@ export default function Dashboard() {
           });
         }
       }
+
+      // Sort newest first
+      derived.sort((a, b) =>
+        new Date(b.slack_ts).getTime() - new Date(a.slack_ts).getTime()
+      );
       setSlackCorrelations(derived);
     } catch {
-      /* silent — Slack is optional; bot may not be in this channel */
+      /* silent — Slack is optional */
     } finally {
       setSlackLoading(false);
+      setSlackSyncing(false);
     }
   }, []);
 
-  // ─── Slack status check on mount, then start sync regardless ─────────────
+  // ─── Slack: fire immediately, then poll every 15s for real-time updates ─────
   useEffect(() => {
-    // Fire an immediate sync — don't wait for status check to resolve
     void syncSlackMessages();
-    // Also poll every 45s
-    const id = setInterval(() => syncSlackMessages(true), 45_000);
+    const id = setInterval(() => syncSlackMessages(true), 15_000);
     return () => clearInterval(id);
   }, [syncSlackMessages]);
 
@@ -347,11 +383,13 @@ export default function Dashboard() {
                 loading={linkedLoading}
                 onCorrelate={handleCorrelate}
               />
-              {/* Slack Correlation Feed — shown even in empty state if data present */}
-              {slackConnected && (
+              {/* Slack Correlation Feed — shown as soon as loading starts or data arrives */}
+              {(slackLoading || slackCorrelations.length > 0 || slackConnected) && (
                 <SlackCorrelationFeed
                   correlations={slackCorrelations}
                   loading={slackLoading}
+                  syncing={slackSyncing}
+                  lastSyncedAt={lastSlackSync}
                 />
               )}
             </aside>
@@ -420,11 +458,13 @@ export default function Dashboard() {
                   onCorrelate={handleCorrelate}
                 />
 
-                {/* Slack ↔ Jira ↔ GitHub Correlation Feed (SLM-powered) */}
-                {slackConnected && (
+                {/* Slack ↔ Jira ↔ GitHub Correlation Feed — always live */}
+                {(slackLoading || slackCorrelations.length > 0 || slackConnected) && (
                   <SlackCorrelationFeed
                     correlations={slackCorrelations}
                     loading={slackLoading}
+                    syncing={slackSyncing}
+                    lastSyncedAt={lastSlackSync}
                   />
                 )}
               </aside>

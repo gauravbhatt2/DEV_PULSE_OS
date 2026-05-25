@@ -6,6 +6,8 @@ import { SlackCorrelation } from '../types';
 interface SlackCorrelationFeedProps {
   correlations: SlackCorrelation[];
   loading?: boolean;
+  syncing?: boolean;
+  lastSyncedAt?: string;
 }
 
 /**
@@ -17,11 +19,11 @@ interface SlackCorrelationFeedProps {
  * Each tile displays the three-stage pipeline:
  *   [Git Commit] ──▶ [Jira Ticket] ──▶ [Slack Discussion]
  */
-export function SlackCorrelationFeed({ correlations, loading }: SlackCorrelationFeedProps) {
+export function SlackCorrelationFeed({ correlations, loading, syncing = false, lastSyncedAt }: SlackCorrelationFeedProps) {
   if (loading) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-        <CorrelationHeader />
+        <CorrelationHeader syncing={syncing} lastSyncedAt={lastSyncedAt} />
         <div className="text-center py-6 text-gray-400 text-sm animate-pulse">
           SLM scanning Slack threads…
         </div>
@@ -32,7 +34,7 @@ export function SlackCorrelationFeed({ correlations, loading }: SlackCorrelation
   if (!correlations || correlations.length === 0) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-        <CorrelationHeader />
+        <CorrelationHeader syncing={syncing} lastSyncedAt={lastSyncedAt} />
         <div className="text-center py-6 border border-dashed border-purple-100 rounded-lg bg-purple-50/30">
           <div className="text-2xl mb-2">💬</div>
           <p className="text-gray-500 text-sm font-medium">No Slack correlations yet.</p>
@@ -48,7 +50,7 @@ export function SlackCorrelationFeed({ correlations, loading }: SlackCorrelation
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-      <CorrelationHeader count={correlations.length} />
+      <CorrelationHeader count={correlations.length} syncing={syncing} lastSyncedAt={lastSyncedAt} />
       <div className="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1">
         {correlations.map((correlation, idx) => (
           <CorrelationTile key={`${correlation.ticket_id}-${idx}`} correlation={correlation} />
@@ -60,24 +62,25 @@ export function SlackCorrelationFeed({ correlations, loading }: SlackCorrelation
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function CorrelationHeader({ count }: { count?: number }) {
+function CorrelationHeader({ count, syncing = false, lastSyncedAt }: { count?: number; syncing?: boolean; lastSyncedAt?: string }) {
   return (
     <div className="flex items-center justify-between mb-4">
       <div>
         <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide flex items-center gap-2">
-          {/* Purple chat icon */}
-          <svg className="w-4 h-4 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
-              clipRule="evenodd"
-            />
-          </svg>
+          {/* Live pulsing dot */}
+          <span
+            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              syncing ? 'bg-purple-400 animate-ping' : 'bg-purple-500 animate-pulse'
+            }`}
+          />
           SLM Correlation Feed
         </h3>
         <p className="text-xs text-gray-400 mt-0.5">
           Git ↔ Jira ↔{' '}
-          <span className="text-purple-500 font-semibold">Slack</span> — auto-linked by local&nbsp;SLM
+          <span className="text-purple-500 font-semibold">Slack</span>
+          {lastSyncedAt && (
+            <span className="ml-2 text-gray-300">· synced {lastSyncedAt}</span>
+          )}
         </p>
       </div>
       {count !== undefined && count > 0 && (

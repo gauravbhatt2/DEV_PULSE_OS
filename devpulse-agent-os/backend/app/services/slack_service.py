@@ -86,6 +86,122 @@ def _get_client() -> WebClient:
     return _client
 
 
+# ─── User ID → Display Name cache (process-lifetime) ─────────────────────────
+
+_user_cache: dict[str, str] = {}
+_cache_loaded: bool = False   # True after the bulk users.list call succeeds
+
+
+def _bulk_load_users() -> None:
+    """
+    Call ``users.list`` ONCE to populate ``_user_cache`` for the entire
+    workspace.  Requires the ``users:read`` OAuth scope.
+
+    This is far more efficient than per-message ``users.info`` calls:
+    one API call handles every user in the workspace up-front.
+    """
+    global _cache_loaded
+    if _cache_loaded:
+        return
+
+    try:
+        client = _get_client()
+        cursor: str | None = None
+
+        while True:
+            kwargs: dict = {"limit": 200}
+            if cursor:
+                kwargs["cursor"] = cursor
+
+            resp = client.users_list(**kwargs)
+            members = resp.get("members", [])
+
+            for user in members:
+                uid = user.get("id", "")
+                if not uid or user.get("deleted"):
+                    continue
+
+                profile = user.get("profile", {})
+                # Priority: display_name → real_name → name (handle)
+                name = (
+                    profile.get("display_name")
+                    or profile.get("real_name")
+                    or user.get("name")
+                    or uid
+                )
+                _user_cache[uid] = name
+
+            next_cursor: str = (
+                resp.get("response_metadata", {}).get("next_cursor", "") or ""
+            )
+            if not next_cursor:
+                break
+            cursor = next_cursor
+
+        _cache_loaded = True
+        logger.info(
+            "Bulk-loaded %d Slack user profiles into cache", len(_user_cache)
+        )
+
+    except SlackApiError as exc:
+        error_code = exc.response.get("error", "unknown")
+        logger.error(
+            "users.list failed (%s) — user IDs will show as raw strings. "
+            "Add the 'users:read' scope to your Slack App at "
+            "https://api.slack.com/apps → OAuth & Permissions → Bot Token Scopes.",
+            error_code,
+        )
+        # Mark as loaded so we don't hammer the API on every message fetch
+        _cache_loaded = True
+    except Exception as exc:
+        logger.warning("Unexpected error during bulk user load: %s", exc)
+        _cache_loaded = True
+
+
+def resolve_display_name(user_id: str) -> str:
+    """
+    Resolve a raw Slack user ID (e.g. ``U0B5Z7JEGUU``) to a human-readable
+    display name (e.g. ``"pallavim11911"`` or ``"Gaurav Bhatt"``).
+
+    On first call this triggers a one-shot bulk ``users.list`` load that
+    populates the cache for every user in the workspace.  Subsequent calls
+    are pure dictionary lookups — zero API calls.
+
+    Falls back to the raw ``user_id`` string if the bot lacks ``users:read``
+    scope or if the specific user is not found.
+    """
+    # Ensure cache is populated before lookup
+    _bulk_load_users()
+
+    if user_id in _user_cache:
+        return _user_cache[user_id]
+
+    # User not in bulk list (e.g. added after last load) — try single lookup
+    try:
+        client = _get_client()
+        resp = client.users_info(user=user_id)
+        profile = resp.get("user", {}).get("profile", {})
+        name = (
+            profile.get("display_name")
+            or profile.get("real_name")
+            or resp["user"].get("name")
+            or user_id
+        )
+        _user_cache[user_id] = name
+        logger.debug("Single-resolved Slack user %s → %r", user_id, name)
+    except SlackApiError as exc:
+        logger.warning(
+            "Could not resolve Slack user %s: %s",
+            user_id, exc.response.get("error", "unknown"),
+        )
+        _user_cache[user_id] = user_id
+    except Exception as exc:
+        logger.warning("Unexpected error resolving user %s: %s", user_id, exc)
+        _user_cache[user_id] = user_id
+
+    return _user_cache[user_id]
+
+
 # ─── Public API ──────────────────────────────────────────────────────────────
 
 
@@ -275,9 +391,13 @@ def fetch_channel_messages(
 
         indicators = extract_ticket_indicators(text)
 
+        # Resolve raw user ID → human-readable display name
+        display_name = resolve_display_name(user_id)
+
         results.append(
             {
-                "developer_id": user_id,
+                "developer_id": display_name,   # real name now, not U0B5Z7JEGUU
+                "developer_raw_id": user_id,    # original ID kept for debugging
                 "message_text": text,
                 "timestamp": ts_iso,
                 # Extra context stream injected directly into the SLM pipeline
