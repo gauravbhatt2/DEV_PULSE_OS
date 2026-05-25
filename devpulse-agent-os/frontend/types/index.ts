@@ -58,6 +58,7 @@ export interface LinkedActivityRecord {
   repository: string;
   commit_message: string;
   pr_title: string;
+  match_type: 'regex' | 'ai';
   created_at: string | null;
 }
 
@@ -82,7 +83,51 @@ export interface IntegrationStatus {
     domain: string | null;
     user?: string;
   };
+  slack?: {
+    status: 'connected' | 'not_configured' | 'error';
+    workspace: string | null;
+    bot_user: string | null;
+  };
   checked_at: string;
+}
+
+// ─────────────────────────────────────────────
+// Ticket Context Types
+// ─────────────────────────────────────────────
+
+export interface GitHubContextEvent {
+  event_id: number;
+  event_type: string;
+  repository: string;
+  branch: string;
+  pusher: string;
+  commits: { sha: string; message: string; author: string }[];
+  pr_title: string;
+  pr_number: number | null;
+  pr_state: string;
+  pr_url: string;
+  pr_merged: boolean;
+  match_type: 'regex' | 'ai';
+  created_at: string | null;
+  linked_at: string | null;
+}
+
+export interface TicketContext {
+  issue_key: string;
+  jira: {
+    key: string;
+    summary: string;
+    description: string;
+    status: string;
+    priority: string;
+    url: string | null;
+  };
+  github: {
+    total_events: number;
+    events: GitHubContextEvent[];
+  };
+  ai_summary: string;
+  generated_at: string;
 }
 
 // ─────────────────────────────────────────────
@@ -191,9 +236,52 @@ export interface CommitAnalysisResult {
   repository: string;
   author: string;
   date: string | null;
-  files_changed: { filename: string; status: string; additions: number; deletions: number }[];
+  files_changed: { filename: string; status: string; additions: number; deletions: number; patch?: string }[];
   jira_ticket: string | null;
   jira_url: string | null;
   analysis: CommitAnalysis;
   analyzed_at: string;
+}
+
+// ─────────────────────────────────────────────
+// Slack Intelligence Types
+// ─────────────────────────────────────────────
+
+export interface SlackTicketIndicators {
+  tickets: string[];
+  pull_requests: string[];
+  commit_shas: string[];
+}
+
+export interface SlackMessage {
+  developer_id: string;
+  message_text: string;
+  timestamp: string;
+  ticket_indicators: SlackTicketIndicators;
+}
+
+export interface SlackSyncResponse {
+  channel: string;
+  message_count: number;
+  messages: SlackMessage[];
+  synced_at: string;
+}
+
+/**
+ * Represents a unified SLM-detected correlation tile:
+ * [Git Commit] ──▶ [Jira Ticket] ──▶ [Slack Discussion]
+ */
+export interface SlackCorrelation {
+  /** The Jira ticket ID that bridges all three signals */
+  ticket_id: string;
+  /** Short commit SHA or PR reference that started the thread */
+  git_ref: string;
+  /** Slack message text that mentioned the ticket */
+  slack_snippet: string;
+  /** Slack user ID of the developer who mentioned it */
+  slack_user: string;
+  /** ISO-8601 timestamp of the Slack message */
+  slack_ts: string;
+  /** Repository where the commit/PR lives */
+  repository?: string;
 }

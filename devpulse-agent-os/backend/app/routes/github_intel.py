@@ -372,6 +372,7 @@ async def analyze_commit(body: AnalyzeCommitRequest) -> Dict[str, Any]:
                 "status": f.get("status"),
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
+                "patch": f.get("patch"),
             }
             for f in files_changed[:20]
         ],

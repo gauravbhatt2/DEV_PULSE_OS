@@ -3,6 +3,7 @@ from app.routes.webhooks import router as webhooks_router
 from app.routes.battle_plan import router as battle_plan_router
 from app.routes.issues import router as issues_router
 from app.routes.jira import router as jira_router
+from app.routes.slack_intel import router as slack_intel_router
 
 __all__ = [
     "core_router",
@@ -10,4 +11,5 @@ __all__ = [
     "battle_plan_router",
     "issues_router",
     "jira_router",
+    "slack_intel_router",
 ]

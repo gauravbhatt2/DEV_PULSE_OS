@@ -4,13 +4,14 @@ import { BattlePlanItem } from '../types';
 interface BattlePlanCardProps {
   task: BattlePlanItem;
   onAction: (action: 'start' | 'open' | 'done', task: BattlePlanItem) => void;
+  onViewContext: (taskKey: string) => void;
   busyTaskKey: string | null;
   busyAction: string | null;
   isHovered: boolean;
   onHover: (taskKey: string | null) => void;
 }
 
-export function BattlePlanCard({ task, onAction, busyTaskKey, busyAction, isHovered, onHover }: BattlePlanCardProps) {
+export function BattlePlanCard({ task, onAction, onViewContext, busyTaskKey, busyAction, isHovered, onHover }: BattlePlanCardProps) {
   const isP0 = task.priority === 'P0';
   const isBusy = busyTaskKey === task.key;
 
@@ -85,6 +86,16 @@ export function BattlePlanCard({ task, onAction, busyTaskKey, busyAction, isHove
           className="bg-emerald-50 border border-emerald-200 text-emerald-600 px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors hover:bg-emerald-100 disabled:opacity-50"
         >
           {isBusy && busyAction === 'done' ? 'Completing…' : '✓ Mark Done'}
+        </button>
+        <button
+          onClick={() => onViewContext(task.key)}
+          className="ml-auto bg-indigo-50 border border-indigo-200 text-indigo-600 px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors hover:bg-indigo-100 flex items-center gap-1"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          View Context
         </button>
       </div>
     </div>

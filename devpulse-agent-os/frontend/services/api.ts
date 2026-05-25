@@ -1,4 +1,4 @@
-import { DashboardData, LinkedActivityRecord, EventCounts, IntegrationStatus } from '../types';
+import { DashboardData, LinkedActivityRecord, EventCounts, IntegrationStatus, TicketContext, SlackSyncResponse } from '../types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_V1 = `${API_BASE}/api`;
@@ -85,6 +85,12 @@ export async function fetchJiraIssues() {
   return fetchJson(`${API_V1}/jira/issues`);
 }
 
+// ─── Ticket Context ───────────────────────────────────────────────
+
+export async function fetchTicketContext(issueKey: string): Promise<TicketContext> {
+  return fetchJson<TicketContext>(`${API_V1}/context/${issueKey}`);
+}
+
 // ─── GitHub Intelligence ─────────────────────────────────────────────────────
 
 import type {
@@ -121,4 +127,52 @@ export async function analyzeCommit(owner: string, repo: string, sha: string): P
     method: 'POST',
     body: JSON.stringify({ owner, repo, sha }),
   });
+}
+
+// ─── Slack Intelligence ──────────────────────────────────────────────────────
+
+/**
+ * Fetch the latest Slack channel messages enriched with SLM context indicators.
+ * Maps to GET /api/v1/slack/sync?channel_name=<name>&limit=<n>
+ */
+export async function fetchSlackMessages(
+  channelName: string,
+  limit = 20,
+): Promise<SlackSyncResponse> {
+  return fetchJson<SlackSyncResponse>(
+    `${API_V1}/v1/slack/sync?channel_name=${encodeURIComponent(channelName)}&limit=${limit}`,
+  );
+}
+
+export interface SlackStatusResult {
+  status: 'connected' | 'not_configured' | 'error';
+  workspace: string | null;
+  bot_user: string | null;
+  bot_id: string | null;
+}
+
+/**
+ * Ping GET /api/v1/slack/status — used by the dashboard badge to determine
+ * whether to render the purple "• Slack Connected" indicator.
+ */
+export async function fetchSlackStatus(): Promise<SlackStatusResult> {
+  return fetchJson<SlackStatusResult>(`${API_V1}/v1/slack/status`);
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  is_member: boolean;
+  num_members: number;
+}
+
+/**
+ * Fetch all public Slack channels visible to the bot.
+ * Maps to GET /api/v1/slack/channels
+ */
+export async function fetchSlackChannels(): Promise<SlackChannel[]> {
+  const res = await fetchJson<{ channels: SlackChannel[]; count: number }>(
+    `${API_V1}/v1/slack/channels`,
+  );
+  return res.channels;
 }

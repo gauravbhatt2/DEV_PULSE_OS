@@ -21,3 +21,6 @@ cryptography==42.0.8
 
 # Environment
 python-dotenv==1.0.1
+
+# Slack integration — channel message sync & SLM context enrichment
+slack_sdk==3.27.1

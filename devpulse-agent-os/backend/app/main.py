@@ -13,6 +13,7 @@ Routes registered:
   /api/battle-plan
   /api/issues/{key}/start, /api/issues/{key}/done
   /api/jira/status, /api/jira/issues, /api/jira/issue/{key}
+  /api/v1/slack/sync, /api/v1/slack/status
 """
 
 import logging
@@ -33,6 +34,8 @@ from app.routes.battle_plan import router as battle_plan_router
 from app.routes.issues import router as issues_router
 from app.routes.jira import router as jira_router
 from app.routes.github_intel import router as github_intel_router
+from app.routes.context import router as context_router
+from app.routes.slack_intel import router as slack_intel_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -92,6 +95,12 @@ app.include_router(jira_router, prefix="/api")
 
 # GitHub Intelligence Dashboard
 app.include_router(github_intel_router)
+
+# Ticket Context (Jira + GitHub + AI summary)
+app.include_router(context_router)
+
+# Slack Intelligence — channel sync & correlation feed
+app.include_router(slack_intel_router)
 
 
 @app.get("/", tags=["Root"], include_in_schema=False)

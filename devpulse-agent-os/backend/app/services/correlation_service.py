@@ -51,12 +51,16 @@ def extract_jira_keys_from_payload(payload: dict) -> Optional[str]:
     return None
 
 
-def auto_correlate_github_event(event: GitHubEvent, db: Session) -> Optional[LinkedActivity]:
+def auto_correlate_github_event(
+    event: GitHubEvent,
+    db: Session,
+    match_type: str = "regex",
+) -> Optional[LinkedActivity]:
     """
     If a GitHubEvent has an extracted_ticket_id, automatically create
     a LinkedActivity record linking it to that Jira ticket.
-
     Idempotent: skips creation if the link already exists.
+    match_type: 'regex' (default) | 'ai'
     """
     if not event.extracted_ticket_id:
         return None
@@ -98,6 +102,7 @@ def auto_correlate_github_event(event: GitHubEvent, db: Session) -> Optional[Lin
         github_event_id=event.id,
         jira_ticket_id=event.extracted_ticket_id,
         description=description,
+        match_type=match_type,
     )
 
     try:
@@ -105,9 +110,10 @@ def auto_correlate_github_event(event: GitHubEvent, db: Session) -> Optional[Lin
         db.commit()
         db.refresh(linked)
         logger.info(
-            "Auto-correlation created: github_event_id=%s → jira_ticket=%s",
+            "Auto-correlation created: github_event_id=%s -> jira_ticket=%s (match_type=%s)",
             event.id,
             event.extracted_ticket_id,
+            match_type,
         )
         return linked
     except Exception as exc:

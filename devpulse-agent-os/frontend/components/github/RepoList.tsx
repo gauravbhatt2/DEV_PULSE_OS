@@ -13,14 +13,12 @@ interface RepoListProps {
 
 function LanguageDot({ lang }: { lang: string | null }) {
   const colors: Record<string, string> = {
-    TypeScript: 'bg-blue-400', JavaScript: 'bg-yellow-400', Python: 'bg-green-400',
-    Go: 'bg-cyan-400', Rust: 'bg-orange-400', Java: 'bg-red-400', Ruby: 'bg-red-500',
-    'C++': 'bg-pink-400', C: 'bg-gray-400', Shell: 'bg-emerald-400',
+    TypeScript: 'bg-blue-500', JavaScript: 'bg-yellow-400', Python: 'bg-green-500',
+    Go: 'bg-cyan-500', Rust: 'bg-orange-500', Java: 'bg-red-500', Ruby: 'bg-red-600',
+    'C++': 'bg-pink-500', C: 'bg-gray-500', Shell: 'bg-emerald-500',
   };
   if (!lang) return null;
-  return (
-    <span className={`inline-block w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0 ${colors[lang] || 'bg-slate-400'}`} />
-  );
+  return <span className={`inline-block w-2 h-2 rounded-full mr-1.5 flex-shrink-0 ${colors[lang] || 'bg-gray-400'}`} />;
 }
 
 export default function RepoList({ repos, selectedRepo, onSelect, loading, search, onSearchChange }: RepoListProps) {
@@ -31,27 +29,34 @@ export default function RepoList({ repos, selectedRepo, onSelect, loading, searc
 
   return (
     <div className="flex flex-col h-full">
+      {/* Search */}
       <div className="px-3 pb-3">
-        <input
-          type="text"
-          placeholder="Search repositories…"
-          value={search}
-          onChange={e => onSearchChange(e.target.value)}
-          className="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
+        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100 transition-all">
+          <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <input
+            type="text"
+            placeholder="Search repositories…"
+            value={search}
+            onChange={e => onSearchChange(e.target.value)}
+            className="flex-1 bg-transparent text-xs text-gray-700 placeholder-gray-400 outline-none"
+          />
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-1 px-2">
+      {/* List */}
+      <div className="flex-1 overflow-y-auto space-y-0.5 px-2">
         {loading && (
           <div className="space-y-2 px-1">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-14 bg-slate-800 rounded-lg animate-pulse" />
+              <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />
             ))}
           </div>
         )}
 
         {!loading && filtered.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-8">
+          <p className="text-xs text-gray-400 text-center py-8">
             {repos.length === 0 ? 'No repositories found' : 'No matches'}
           </p>
         )}
@@ -64,28 +69,26 @@ export default function RepoList({ repos, selectedRepo, onSelect, loading, searc
               onClick={() => onSelect(repo)}
               className={`w-full text-left px-3 py-2.5 rounded-lg transition-all ${
                 isSelected
-                  ? 'bg-blue-600/20 border border-blue-500/40 text-white'
-                  : 'hover:bg-slate-800/80 text-slate-300 border border-transparent'
+                  ? 'bg-blue-50 border border-blue-200 text-blue-900'
+                  : 'hover:bg-gray-50 text-gray-700 border border-transparent hover:border-gray-200'
               }`}
             >
               <div className="flex items-center gap-1.5 mb-0.5">
                 <LanguageDot lang={repo.language} />
                 <span className="text-xs font-medium truncate">{repo.name}</span>
                 {repo.private && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-slate-700 text-slate-400 rounded flex-shrink-0">
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded border border-gray-200 flex-shrink-0">
                     private
                   </span>
                 )}
               </div>
               {repo.description && (
-                <p className="text-[11px] text-slate-500 truncate">{repo.description}</p>
+                <p className="text-[11px] text-gray-400 truncate">{repo.description}</p>
               )}
               <div className="flex items-center gap-3 mt-1">
-                <span className="text-[10px] text-slate-600">
-                  {repo.open_issues_count} issues
-                </span>
+                <span className="text-[10px] text-gray-400">{repo.open_issues_count} issues</span>
                 {repo.pushed_at && (
-                  <span className="text-[10px] text-slate-600">
+                  <span className="text-[10px] text-gray-400">
                     {new Date(repo.pushed_at).toLocaleDateString()}
                   </span>
                 )}
@@ -95,8 +98,9 @@ export default function RepoList({ repos, selectedRepo, onSelect, loading, searc
         })}
       </div>
 
-      <div className="px-3 pt-2 border-t border-slate-800">
-        <p className="text-[11px] text-slate-600">{repos.length} repositories connected</p>
+      {/* Footer */}
+      <div className="px-3 pt-2 border-t border-gray-100">
+        <p className="text-[11px] text-gray-400">{repos.length} repositories connected</p>
       </div>
     </div>
   );

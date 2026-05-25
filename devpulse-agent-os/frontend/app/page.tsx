@@ -8,6 +8,8 @@ import { JiraBacklogTable } from '@/components/JiraBacklogTable';
 import { ActivityTimeline } from '@/components/ActivityTimeline';
 import { LinkedActivityPanel } from '@/components/LinkedActivityPanel';
 import { EventCounter } from '@/components/EventCounter';
+import { ContextDrawer } from '@/components/ContextDrawer';
+import { SlackCorrelationFeed } from '@/components/SlackCorrelationFeed';
 import { ToastContainer, ToastMessage, ToastType } from '@/components/Toast';
 import {
   fetchBattlePlan,
@@ -17,8 +19,26 @@ import {
   fetchLinkedActivity,
   fetchIntegrationStatus,
   triggerCorrelation,
+  fetchTicketContext,
+  fetchSlackMessages,
+  fetchSlackStatus,
 } from '@/services/api';
-import { DashboardData, BattlePlanItem, ActivityEvent, LinkedActivityRecord, EventCounts, IntegrationStatus } from '@/types';
+import {
+  DashboardData,
+  BattlePlanItem,
+  ActivityEvent,
+  LinkedActivityRecord,
+  EventCounts,
+  IntegrationStatus,
+  TicketContext,
+  SlackMessage,
+  SlackCorrelation,
+} from '@/types';
+
+// ─── Env-driven Slack channel (falls back to the channel the bot is in) ────────
+const SLACK_CHANNEL =
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SLACK_DEFAULT_CHANNEL) ||
+  'development';
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -33,6 +53,17 @@ export default function Dashboard() {
   const [linkedLoading, setLinkedLoading] = useState(false);
   const [eventCounts, setEventCounts] = useState<EventCounts | null>(null);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+
+  // Context drawer state
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [activeContext, setActiveContext] = useState<TicketContext | null>(null);
+
+  // ─── Slack state ────────────────────────────────────────────────────────────
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackMessages, setSlackMessages] = useState<SlackMessage[]>([]);
+  const [slackCorrelations, setSlackCorrelations] = useState<SlackCorrelation[]>([]);
+  const [slackLoading, setSlackLoading] = useState(false);
 
   // ─── Load persisted activities ──────────────────────────────────────────────
   useEffect(() => {
@@ -60,6 +91,68 @@ export default function Dashboard() {
       if (linked.status === 'fulfilled') setLinkedRecords(linked.value);
     } catch {}
   }, []);
+
+  // ─── Slack status check on mount (metadata only — sync runs independently) ──
+  useEffect(() => {
+    fetchSlackStatus()
+      .then(s => setSlackConnected(s.status === 'connected'))
+      .catch(() => {});
+  }, []);
+
+  // ─── Slack message sync helper ────────────────────────────────────────────
+  // NOTE: We do NOT gate on slackConnected here — the status check is async
+  // and can resolve after the first render. We let it try and fail silently.
+  const syncSlackMessages = useCallback(async (silent = false) => {
+    if (!silent) setSlackLoading(true);
+    try {
+      const response = await fetchSlackMessages(SLACK_CHANNEL, 30);
+      setSlackMessages(response.messages);
+      setSlackConnected(true); // mark connected if fetch succeeded
+
+      // ── Build correlation tiles from SLM-extracted indicators ──────────────
+      // A tile is emitted for every message that mentions at least ONE Jira
+      // ticket ID (e.g. SCRUM-3). A git ref (PR or SHA) enriches the tile
+      // but is not required — the tile still shows if only a ticket is found.
+      const derived: SlackCorrelation[] = [];
+      for (const msg of response.messages) {
+        const { tickets, pull_requests, commit_shas } = msg.ticket_indicators;
+
+        if (tickets.length === 0) continue; // no ticket ref → skip
+
+        // Pick the first git reference available (PR preferred over SHA)
+        const gitRef =
+          pull_requests.length > 0
+            ? `PR #${pull_requests[0]}`
+            : commit_shas.length > 0
+            ? commit_shas[0].slice(0, 7)
+            : '—';
+
+        for (const ticketId of tickets) {
+          derived.push({
+            ticket_id: ticketId,
+            git_ref: gitRef,
+            slack_snippet: msg.message_text.slice(0, 140),
+            slack_user: msg.developer_id,
+            slack_ts: msg.timestamp,
+          });
+        }
+      }
+      setSlackCorrelations(derived);
+    } catch {
+      /* silent — Slack is optional; bot may not be in this channel */
+    } finally {
+      setSlackLoading(false);
+    }
+  }, []);
+
+  // ─── Slack status check on mount, then start sync regardless ─────────────
+  useEffect(() => {
+    // Fire an immediate sync — don't wait for status check to resolve
+    void syncSlackMessages();
+    // Also poll every 45s
+    const id = setInterval(() => syncSlackMessages(true), 45_000);
+    return () => clearInterval(id);
+  }, [syncSlackMessages]);
 
   // ─── Toast helpers ──────────────────────────────────────────────────────────
   const showToast = useCallback((message: string, type: ToastType = 'info') => {
@@ -139,6 +232,28 @@ export default function Dashboard() {
     }
   }, [data, loadData, addActivity, showToast]);
 
+  // ─── View Context handler ────────────────────────────────────────────
+  const handleViewContext = useCallback(async (issueKey: string) => {
+    setContextDrawerOpen(true);
+    setContextLoading(true);
+    setActiveContext(null);
+    try {
+      const ctx = await fetchTicketContext(issueKey);
+      setActiveContext(ctx);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load context';
+      showToast(msg, 'error');
+      setContextDrawerOpen(false);
+    } finally {
+      setContextLoading(false);
+    }
+  }, [showToast]);
+
+  const handleCloseContext = useCallback(() => {
+    setContextDrawerOpen(false);
+    setActiveContext(null);
+  }, []);
+
   // ─── Correlation trigger ─────────────────────────────────────────────────────
   const handleCorrelate = useCallback(async () => {
     setLinkedLoading(true);
@@ -150,13 +265,15 @@ export default function Dashboard() {
       );
       const linked = await fetchLinkedActivity(0, 20);
       setLinkedRecords(linked);
+      // Re-sync Slack after a manual correlation run
+      void syncSlackMessages();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Correlation failed';
       showToast(msg, 'error');
     } finally {
       setLinkedLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, syncSlackMessages]);
 
   const jiraConnected = integrationStatus?.jira.status === 'connected';
   const githubConnected = integrationStatus?.github.status === 'connected';
@@ -166,13 +283,23 @@ export default function Dashboard() {
       <div className="max-w-[1280px] mx-auto px-5 py-8">
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-        {/* Header */}
+        {/* Context Drawer */}
+        {contextDrawerOpen && (
+          <ContextDrawer
+            context={activeContext}
+            loading={contextLoading}
+            onClose={handleCloseContext}
+          />
+        )}
+
+        {/* Header — now includes slackConnected prop for the purple badge */}
         <Header
           lastSync={data?.summary.lastSync || '--:--'}
           onRefresh={loadData}
           disabled={loading}
           jiraConnected={jiraConnected}
           githubConnected={githubConnected}
+          slackConnected={slackConnected}
         />
 
         {/* Welcome / Empty State */}
@@ -189,6 +316,7 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-500 leading-7">
                   DevPulse Agent OS analyzes your Jira backlog and GitHub activity, then tells you
                   exactly what to work on first — and why. Commits are auto-linked to Jira tickets.
+                  Slack discussions are correlated in real time by the local SLM.
                 </p>
               </div>
               <button
@@ -198,11 +326,11 @@ export default function Dashboard() {
                 Generate Battle Plan
               </button>
 
-              {/* Core Flow Explainer */}
+              {/* Core Flow Explainer — updated to include Slack */}
               <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Core Correlation Flow</p>
                 <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 font-mono">
-                  {['GitHub Commit', '→', 'Webhook', '→', 'Extract DEV-101', '→', 'Match Jira', '→', 'Link Activity', '→', 'Dashboard'].map((step, i) => (
+                  {['GitHub Commit', '→', 'Webhook', '→', 'Extract DEV-101', '→', 'Match Jira', '→', 'Slack SLM', '→', 'Dashboard'].map((step, i) => (
                     <span key={i} className={step === '→' ? 'text-slate-300' : 'bg-white border border-slate-200 px-2 py-0.5 rounded'}>
                       {step}
                     </span>
@@ -212,12 +340,20 @@ export default function Dashboard() {
             </section>
 
             <aside className="flex flex-col gap-5">
-              <EventCounter counts={eventCounts} />
+              {/* EVENT PIPELINE — slackMessages prop feeds the purple Slack row */}
+              <EventCounter counts={eventCounts} slackMessages={slackMessages.length} />
               <LinkedActivityPanel
                 records={linkedRecords}
                 loading={linkedLoading}
                 onCorrelate={handleCorrelate}
               />
+              {/* Slack Correlation Feed — shown even in empty state if data present */}
+              {slackConnected && (
+                <SlackCorrelationFeed
+                  correlations={slackCorrelations}
+                  loading={slackLoading}
+                />
+              )}
             </aside>
           </div>
         )}
@@ -252,6 +388,7 @@ export default function Dashboard() {
                         key={task.id}
                         task={task}
                         onAction={handleAction}
+                        onViewContext={handleViewContext}
                         busyTaskKey={busyTaskKey}
                         busyAction={busyAction}
                         isHovered={hoveredTaskKey === task.key}
@@ -264,8 +401,8 @@ export default function Dashboard() {
 
               {/* Right: Sidebar */}
               <aside className="flex flex-col gap-5 sticky top-6">
-                {/* Event Counts */}
-                <EventCounter counts={eventCounts} />
+                {/* Event Counts — includes slackMessages purple row */}
+                <EventCounter counts={eventCounts} slackMessages={slackMessages.length} />
 
                 {/* Jira Backlog + Activity */}
                 <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
@@ -282,6 +419,14 @@ export default function Dashboard() {
                   loading={linkedLoading}
                   onCorrelate={handleCorrelate}
                 />
+
+                {/* Slack ↔ Jira ↔ GitHub Correlation Feed (SLM-powered) */}
+                {slackConnected && (
+                  <SlackCorrelationFeed
+                    correlations={slackCorrelations}
+                    loading={slackLoading}
+                  />
+                )}
               </aside>
             </div>
           </div>
@@ -294,6 +439,11 @@ export default function Dashboard() {
             <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2.5 py-1 rounded-full font-medium">
               Systems Nominal
             </span>
+            {slackConnected && (
+              <span className="bg-purple-50 text-purple-600 border border-purple-200 px-2.5 py-1 rounded-full font-medium">
+                Slack Active
+              </span>
+            )}
             <a href="/docs" target="_blank" className="text-blue-400 hover:text-blue-600 transition-colors">
               API Docs ↗
             </a>
